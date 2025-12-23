@@ -115,7 +115,6 @@ internal abstract class AzureTableStorageCache : IDistributedCache
 
             try
             {
-                // Use the entity's ETag for optimistic concurrency. This avoids updating if the entity was deleted or changed.
                 await _tableClient
                     .UpdateEntityAsync(item, ETag.All, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);

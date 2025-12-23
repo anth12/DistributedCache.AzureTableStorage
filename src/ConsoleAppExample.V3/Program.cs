@@ -11,7 +11,7 @@ namespace ConsoleAppExample.V3;
 
 internal class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
         // Create ServiceCollection
         var services = new ServiceCollection();
@@ -45,7 +45,9 @@ internal class Program
         var cache = serviceProvider.GetService<IDistributedCache>();
 
         // Run tests
-        TestAsync(logger, cache).GetAwaiter().GetResult();
+        //await TestAsync(logger, cache);
+
+        await ReproduceRaceCondition(logger, cache);
     }
 
     private static async Task TestAsync(ILogger logger, IDistributedCache cache)
@@ -86,5 +88,46 @@ internal class Program
         logger.LogInformation("arrayResult : {arrayResult}", JsonConvert.SerializeObject(arrayResult));
 
         await Task.Delay(TimeSpan.FromSeconds(1));
+    }
+    
+    private static async Task ReproduceRaceCondition(ILogger logger, IDistributedCache cache)
+    {
+        string key = "race-key";
+        string value = "race-value-" + Guid.NewGuid();
+        var cacheOptions = new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(10) };
+        await cache.SetStringAsync(key, value, cacheOptions);
+
+        int concurrency = 10;
+        int durationSeconds = 30;
+        var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(durationSeconds));
+        var tasks = new Task[concurrency];
+
+        for (int i = 0; i < concurrency; i++)
+        {
+            tasks[i] = Task.Run(async () =>
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var result = await cache.GetStringAsync(key, cts.Token);
+                        
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Exception in GetStringAsync");
+                    }
+                }
+            }, cts.Token);
+        }
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException)
+        { }
+
+        logger.LogInformation("Race condition test completed.");
     }
 }
